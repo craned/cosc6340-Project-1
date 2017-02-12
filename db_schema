@@ -1,0 +1,2 @@
+Employee(employeeid(k),name,salary)
+Department(deptid(k),subdeptid(k),deptname,deptSalesAmt)
