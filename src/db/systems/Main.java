@@ -47,7 +47,7 @@ public class Main {
 			return;
 		}
 
-		if (connection != null) {
+		if (conn != null) {
 			System.out.println("Connection successful.");
 		} else {
 			System.out.println("Failed to make connection!");
@@ -55,9 +55,9 @@ public class Main {
 		}
 
 		extractColumns();
-		extractData(connection);
+		extractData(conn);
     	
-    	verify1NF(connection);
+    	verify1NF(conn);
 	}
 	
 	public static ResultSet executeQuery(String sqlStatement) {
