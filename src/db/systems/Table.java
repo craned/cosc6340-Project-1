@@ -8,7 +8,7 @@ public class Table
 	String name = "";
 	ArrayList<String> keys = new ArrayList<>();
 	ArrayList<String> nonKeys = new ArrayList<>();
-	HashMap<String, int[]> colData = new HashMap<>();
+	HashMap<String, String[]> colData = new HashMap<>();
 	
 	public Table(String tableName, String[] columns)
 	{

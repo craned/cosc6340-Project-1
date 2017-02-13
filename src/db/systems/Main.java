@@ -60,19 +60,19 @@ public class Main {
     	verify1NF(conn);
 	}
 	
-	public static ResultSet executeQuery(String sqlStatement) {
-		try {
+	public static ResultSet executeQuery(String sqlStatement) throws SQLException {
+//		try {
+			System.out.println(sqlStatement);
 			return st.executeQuery(sqlStatement);
-		} catch (SQLException e) {
-			e.printStackTrace();
-			return null;
-		}
+//		} catch (SQLException e) {
+//			e.printStackTrace();
+//			return null;
+//		}
 	}
 	
 	private static void verify1NF(Connection connection)
 	{
 		try {
-			// TODO: use HashMap to iterate through table schemas
 			for (Table t : tables) {
 				st = connection.createStatement();
 				String query = "select count(*) from public." + t.name;
@@ -153,19 +153,19 @@ public class Main {
 		try {
 			for (Table t : tables) {
 				ArrayList<String> cols = new ArrayList<>();
-				ArrayList<Integer> colData = new ArrayList<>();
+				ArrayList<String> colData = new ArrayList<>();
 				cols.addAll(t.keys);
 				cols.addAll(t.nonKeys);
-				// TODO: use HashMap to iterate through table schemas
+				
 				for (String col : cols) {
 					st = connection.createStatement();
 					String query = "select " + col + " from public." + t.name;
 					
 					ResultSet rs = executeQuery(query);
 		            while(rs.next()){
-		            	colData.add(rs.getInt(1));
+		            	colData.add(rs.getString(1));
 		            }
-					int[] colDataTransfer = new int[colData.size()];
+		            String[] colDataTransfer = new String[colData.size()];
 					for (int i = 0; i < colData.size(); i++) {
 						colDataTransfer[i] = colData.get(i);
 					}
@@ -176,7 +176,8 @@ public class Main {
 		} catch (SQLException e) {
 			System.out.println("1NF query failed.");
 			System.out.println(e.getMessage());
-			e.printStackTrace();
+			
+			e.printStackTrace(); //TODO remove for production
 			
 			return;
 		}
