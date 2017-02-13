@@ -17,7 +17,9 @@ import java.util.Properties;
 public class Main {
 
     private static Statement st = null;
-	public static HashMap<String, String> candidateKeys = new HashMap<String, String>(); 
+//	public static HashMap<String, String> tableSchemas = new HashMap<String, String>(); 
+	public static ArrayList<Table> tables = new ArrayList<>();
+	public static HashMap<String, Table> tableData = new HashMap<>();
 
 	public static void main(String[] argv) {
 		
@@ -52,35 +54,18 @@ public class Main {
 			System.out.println("Failed to make connection!");
 		}
 
-    	extractCandidateKeys();
-
 		try {
-			Statement s = connection.createStatement();
-			String query = "select * from T";
-			ResultSet rs = s.executeQuery(query);
-			
-            while(rs.next()){
-                System.out.println( rs.getInt(1) + " " + rs.getInt(2)+ " " + rs.getInt(3));
-             }
 		} catch (SQLException e) {
-			System.out.println("Query failed.");
-			System.out.println(e.getMessage());
 			e.printStackTrace();
-			
-			return;
 		}
 	}
 	
-	public static ResultSet executeQuery(String sqlStatement) {
 		try {
-			return st.executeQuery(sqlStatement);
 		} catch (SQLException e) {
 			e.printStackTrace();
-			return null;
 		}
 	}
 	
-	private static void extractCandidateKeys()
 	{
 		BufferedReader br = null;
 		try {
@@ -93,20 +78,7 @@ public class Main {
 	        	String cols = schema.substring(schema.indexOf("(")+1, schema.length()-1);
 	        	
 	        	String[] columns = cols.split(",");
-	        	System.out.println (tableName);
-	        	System.out.println (cols);
-	        	String candidateKeysStr = "";
-	        	for (int i = 0; i < columns.length; i++) {
-	        		String col = columns[i];
-	        		if (col.contains("k")) {
-	        			String key = col.substring(0, col.indexOf("("));
-	        			System.out.println (key);
-	        			candidateKeysStr += key + "|";
-	        		}
-	        	}
 	        	
-	        	candidateKeysStr.substring(0, candidateKeysStr.length()-1);
-	        	candidateKeys.put(tableName, candidateKeysStr);
 	        }
 		} catch (FileNotFoundException e) {
             e.printStackTrace();
