@@ -90,16 +90,20 @@ public class Main {
 				ResultSet rs = executeQuery(query);
 	            while(rs.next()){
 	            	if (rs.getInt(1) > 0) {
-	            		System.out.println("1NF Validation Error: null candidate key");
+	            		System.out.println("1NF Validation error " + t.name + ": null candidate key");
 	            		return;
 	            	}
 	            }
 	            
-	            query = "select count(*) employeeid from public." + t.name + " group by employeeid";
+	            String keys = "";
+	            for (int i = 0; i < t.keys.size(); i++) {
+	            	keys += t.keys.get(i) + (i < t.keys.size()-1 ? ", " : "");
+	            }
+	            query = "select count(*) from public." + t.name + " group by " + keys;
 	            rs = executeQuery(query);
 	            while(rs.next()){
 	            	if (rs.getInt(1) > 1) {
-	            		System.out.println("1NF Validation Error: duplicate candidate keys");
+	            		System.out.println("1NF Validation error " + t.name + ": duplicate candidate keys");
 	            		return;
 	            	}
 	            }
