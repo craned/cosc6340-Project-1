@@ -6,8 +6,8 @@ import java.util.HashMap;
 public class Table
 {
 	String name = "";
-	ArrayList<String> keys = new ArrayList<>();
-	ArrayList<String> nonKeys = new ArrayList<>();
+	ArrayList<String> keysList = new ArrayList<>();
+	ArrayList<String> nonKeysList = new ArrayList<>();
 	HashMap<String, String[]> colData = new HashMap<>();
 	
 	public Table(String tableName, String[] columns)
@@ -20,11 +20,11 @@ public class Table
 	{
 		for (int i = 0; i < columns.length; i++) {
     		String col = columns[i];
-    		if (col.contains("k")) {
+    		if (col.contains("(k)")) {
     			String key = col.substring(0, col.indexOf("("));
-    			keys.add(key);
+    			keysList.add(key);
     		} else {
-    			nonKeys.add(col);
+    			nonKeysList.add(col);
     		}
     	}
 	}
