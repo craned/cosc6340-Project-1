@@ -131,7 +131,9 @@ public class Main {
 	                } else {
 	                	System.out.println("PASSES 2NF");
 	                }
-	            }
+	            } else {
+                	System.out.println("PASSES 2NF");
+                }
 	        }
 	                             
 	        
