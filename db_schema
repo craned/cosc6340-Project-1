@@ -1,4 +1,4 @@
-R(K1(k),K2(k),A,B)
+R(K1(k),K2(k),A,B,C)
 S(K1(k),A)
 T(K1(k),K2(k),A)
 Y(k1(k),k2(k),k3(k),k4(k),A)

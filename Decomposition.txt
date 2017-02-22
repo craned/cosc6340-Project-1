@@ -1,0 +1,16 @@
+#x decomposition:
+x1(k1,k2,k3)
+x2(k1,k2,A)
+T1(K1,K2,A)
+#Verification:
+
+#Y decomposition:
+Y1(k1,k2,k3,k4)
+Y2(k2,k4,A)
+Y3(k1,k2,k4,A)
+Y4(k2,k3,k4,A)
+#Verification:
+
+Z1(k1,k2,B,D)
+Z2(B,A)
+Z3(D,A)

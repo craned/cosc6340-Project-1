@@ -1,5 +1,8 @@
 package db.systems;
 
+
+
+
 import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.io.BufferedReader;
@@ -7,6 +10,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStreamReader;
+
 import java.io.PrintWriter;
 import java.io.UnsupportedEncodingException;
 import java.io.Writer;
@@ -17,6 +21,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
+
+import javax.sql.rowset.Joinable;
+
+import com.vertica.dsi.dataengine.utilities.Updatable;
+import com.vertica.jdbc.SMetaDataProxy;
 
 public class Main {
 
@@ -37,19 +46,18 @@ public class Main {
 	public static ArrayList<String> mainvalue=new ArrayList<String>();
 	
 	public static Writer sqlWriter = null;
-	public static String NF_SQL_FILENAME = "NF.sql";
+	public static Writer nfOutputWriter = null;
+	public static Writer decompositionWriter = null;
+	public static final String NF_SQL_FILENAME = "NF.sql";
+	public static final String NF_OUTPUT_FILENAME = "NF.txt";
+	public static final String DECOMPOSITION_FILENAME = "Decomposition.txt";
 
 	public static void main(String[] argv) {
-		
 		if (argv.length > 0) {
 			String arg0 = argv[0];
 			String[] split = arg0.split("=");
 			schemaFilename = split[1];
 		}
-		
-//		for (String tableName : tableData.keySet()) {
-//			Table table = tableData.get(tableName);
-//		}
 		
 		try {
             Class.forName("com.vertica.jdbc.Driver");
@@ -84,14 +92,10 @@ public class Main {
 		
 		try {
 			sqlWriter = new PrintWriter(NF_SQL_FILENAME, "UTF-8");
-		} catch (FileNotFoundException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		} catch (UnsupportedEncodingException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
-
+			nfOutputWriter = new PrintWriter(NF_OUTPUT_FILENAME, "UTF-8");
+			
+			decompositionWriter = new PrintWriter(DECOMPOSITION_FILENAME, "UTF-8");
+			nfOutputWriter.write("#Table\t3NF\tFailed\tReason\n");
 		extractColumns();
 //		extractData(conn);
     	
@@ -101,12 +105,14 @@ public class Main {
             boolean isOneNF=true;
             boolean isTwoNF=true;
             boolean isThreeNF = true;
+	        String reason = "";
             
     		Table t = tableData.get(tableName);
 //    		String tablePlusSchema = "team06schema." + tableName;
 	    	//procedure:
-	        if(!oneNF(t.keysList, t.nonKeysList, tableName, conn)){
+	        if((reason = oneNF(t.keysList, t.nonKeysList, tableName, conn)) != ""){
 	            System.out.println("not 1NF");
+	            nfOutputWriter.write(tableName + "\tN\t1NF\t" + reason + "\n");
 	            isOneNF=false;
 	            isTwoNF=false;
 	            isThreeNF=false;
@@ -114,19 +120,44 @@ public class Main {
 	        } else{
 	        	System.out.println("PASSES 1NF");
 	        }
-	            
-	            
+	        
 	        if(isOneNF){
-	            if (t.keysList.size()>1){             
-	                if(twoNF(t.keysList,t.nonKeysList,tableName,conn)!=""){
+	        	if (t.nonKeysList.size() == 0){
+	        		System.out.println("PASSES 2NF");
+	        		System.out.println("PASSES 3NF");
+		            nfOutputWriter.write(tableName + "\tY\n");
+		            continue;
+	        	} else if (t.keysList.size()>1){
+	                if((reason = twoNF(t.keysList,t.nonKeysList,tableName,conn))!=""){
 	                    isTwoNF=false;
 	                    isThreeNF=false;
 	                    System.out.println("not 2NF");
-	                    decompose2NF(tableName, twoNF(t.keysList,t.nonKeysList,tableName,conn));
-	        	        
+	                    if (reason.lastIndexOf(",") == reason.length()-1) {
+	                    	reason = reason.substring(0, reason.length()-1);
+	                    } else if (reason.lastIndexOf(",") == reason.length()-2) {
+	                    	reason = reason.substring(0, reason.length()-2);
+	                    }
+	    	            nfOutputWriter.write(tableName + "\tN\t2NF\t" + reason + "\n");
+	    	            decompositionWriter.write("#" + tableName + " decomposition:\n");
+	                    decompose2NF(tableName, twoNF(t.keysList,t.nonKeysList,tableName,conn),conn);
+	                    join2nf(tableName,conn);
 	        	        for (Map.Entry<String, ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
-	        	        	System.out.println (entry.getKey() + " " + entry.getValue());
+	        	        	String value = "";
+	        	        	for (ArrayList<String> al : entry.getValue()) {
+	        	        		for (String str : al) {
+	        	        			value += str + ",";
+	        	        		}
+	        	        	}
+        	        		value = value.substring(0, value.lastIndexOf(","));
+    	    	            String result = entry.getKey() + "(" + value + ")";
+    	    	            
+    	    	            decompositionWriter.write(result + "\n");
+	        	        	System.out.println (result);
 	        	        }
+	        	        
+	        	        decompose.clear();
+	        	        
+	    	            decompositionWriter.write("#Verification:\n\n");
 	        	        continue;
 	                } else {
 	                	System.out.println("PASSES 2NF");
@@ -135,23 +166,53 @@ public class Main {
                 	System.out.println("PASSES 2NF");
                 }
 	        }
-	                             
 	        
-	        if(/*(t.nonKeysList.size()>1) &&*/ isTwoNF && threeNF(t.nonKeysList, tableName, conn)!=""){
+	        if((t.nonKeysList.size()>1) && isTwoNF && (reason = threeNF(t.nonKeysList, tableName, conn))!=""){
 	            isThreeNF=false;
 	            System.out.println("not 3NF");
-	            decompose3NF(t.keysList, t.nonKeysList, tableName, threeNF(t.nonKeysList, tableName, conn));
-		        
-		        for (Map.Entry<String, ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
-		        	System.out.println (entry.getKey() + " " + entry.getValue());
-		        }
+                if (reason.lastIndexOf(",") == reason.length()-1) {
+                	reason = reason.substring(0, reason.length()-1);
+                } else if (reason.lastIndexOf(",") == reason.length()-2) {
+                	reason = reason.substring(0, reason.length()-2);
+                }
+	            nfOutputWriter.write(tableName + "\tN\t3NF\t" + reason + "\n");
+	            decompose3NF(t.keysList, t.nonKeysList, tableName, threeNF(t.nonKeysList, tableName, conn),conn);
+    	        
+    	        for (Map.Entry<String, ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+    	        	String value = "";
+    	        	for (ArrayList<String> al : entry.getValue()) {
+    	        		for (String str : al) {
+    	        			value += str + ",";
+    	        		}
+    	        	}
+	        		value = value.substring(0, value.lastIndexOf(","));
+    	            String result = entry.getKey() + "(" + value + ")";
+    	            
+    	            decompositionWriter.write(result + "\n");
+    	        	System.out.println (result);
+    	        }
+
+		        //join(tableName, conn);
+	            join1(tableName, conn);
+    	        
+    	        decompose.clear();
+    	        
 	        } else {
 	        	System.out.println("PASSES 3NF");
+	            nfOutputWriter.write(tableName + "\tY\n");
 	        }
     	}
     	
-    	try {
-			sqlWriter.close();
+    	sqlWriter.close();
+    	nfOutputWriter.close();
+    	decompositionWriter.close();
+    	
+		} catch (FileNotFoundException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		} catch (UnsupportedEncodingException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -169,12 +230,15 @@ public class Main {
 		}
 	}
 	
-    public static void decompose2NF(String tableName, String output){ // k1,k2->A
-        //Kanya
+	public static void decompose2NF(String tableName, String output,Connection conn){ // k1,k2->A
+    	try{
+    	Statement stmt = conn.createStatement();
+    
         System.out.println("output: "+output);
         System.out.println("decompose2NF");	
-		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
-			String s11="CREATE table";
+        for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+			System.out.println("decompose");
+			String s11="create table";
 			String s21="";
 			ArrayList<String> key1=new ArrayList<String>();
 			ArrayList<String> nonkey1=new ArrayList<String>();
@@ -193,11 +257,11 @@ public class Main {
 				else
 					s21=s21+key1.get(i).toString()+"))";
 				}
-			String query = s11+" "+entry.getKey()+"("+s21;
-			schemaMap.put(entry.getKey(), schemaPrivate);
+			String query = s11+" "+schemaMap.get(entry.getKey())+"."+entry.getKey()+"("+s21;
+			//schemaMap.put(entry.getKey(), schemaPrivate); // TODO: why commented out?
 			System.out.println(query);
 			writeSQL(query);
-			
+			stmt.executeUpdate(query);
 			
 		}
 		
@@ -209,6 +273,10 @@ public class Main {
 			key1.addAll(entry.getValue().get(0));
 			nonkey1.addAll(entry.getValue().get(1));
 			for(int i=0;i<entry.getValue().get(0).size();i++){
+				
+				if(nonkey1.size()==0&&i==entry.getValue().get(0).size()-1)
+					sd2=sd2+key1.get(i).toString()+")";
+				else
 					sd2=sd2+key1.get(i).toString()+",";
 
 			}
@@ -221,199 +289,360 @@ public class Main {
 				}
 			String sd3="";
 			for(int i=0;i<entry.getValue().get(0).size();i++){
-					sd3=sd3+key1.get(i).toString()+"."+tableName+",";
+				if(nonkey1.size()==0&&i==entry.getValue().get(0).size()-1)
+						sd3=sd3+key1.get(i).toString();
+					else
+						sd3=sd3+key1.get(i).toString()+",";
+					//sd3=sd3+tableName+"."+key1.get(i).toString()+",";
 
 			}
 			
 			for(int i=0;i<nonkey1.size();i++){
 				if(i<nonkey1.size()-1)
-				sd3=sd3+nonkey1.get(i).toString()+"."+tableName+",";
+				sd3=sd3+tableName+"."+nonkey1.get(i).toString()+",";
 				else
-					sd3=sd3+nonkey1.get(i).toString()+"."+tableName;
+					sd3=sd3+tableName+"."+nonkey1.get(i).toString();
 			}
-			String query = sd1+" "+entry.getKey()+"("+sd2+" "+" SELECT "+sd3+" FROM "+" "+tableName;
+			String query = sd1+" "+schemaPrivate+"."+entry.getKey()+"("+sd2+" "+" SELECT "+sd3+" FROM"+" "+schemaPrivate+"."+tableName;
+			System.out.println(query);
 			writeSQL(query);
+			stmt.executeUpdate(query);
 		}//*/
-         
+    	}
+    	catch(Exception e){
+    		System.out.println(e);
+    	}
         //suppose you have a output string like: "T: K1->A, K2->B"
      }
     
-     public static void decompose3NF(ArrayList<String> keysList,ArrayList<String> nonKeysList,String tableName, String output){
-         //Kanya
-         System.out.println("output: "+output);
-         System.out.println("decompose3NF");
-     
- 		int count=2;
- 		for(Map.Entry<String,String> entry:dep.entrySet()){
- 			ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
- 			ArrayList<String> temKey=new ArrayList<String>();
- 			ArrayList<String> temValue=new ArrayList<String>();
- 			temKey.add(entry.getKey());
- 			temValue.add(entry.getValue());
- 			tem.add(temKey);
- 			tem.add(temValue);
- 			decompose.put("R"+Integer.toString(count),tem);
- 			mainkey.add(entry.getKey());
- 			System.out.println(mainkey);
- 			mainvalue.add(entry.getValue());
- 			System.out.println(mainvalue);
- 			count++;
- 			
- 		}
- 		mainkey.removeAll(mainvalue);
- 		System.out.println(mainkey);
- 		ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
- 		ArrayList<String> temValue=new ArrayList<String>();
- 		temValue.addAll(nonKeysList);
- 		temValue.retainAll(mainkey);
- 		System.out.println(temValue);
- 		tem.add(keysList);
- 		tem.add(temValue);
- 		decompose.put("R1", tem);
- 		String sc1="CREATE table";
- 		String s2="";
- 		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
- 			String s11="CREATE table";
- 			String s21="";
- 			ArrayList<String> key1=new ArrayList<String>();
- 			ArrayList<String> nonkey1=new ArrayList<String>();
- 			key1.addAll(entry.getValue().get(0));
- 			nonkey1.addAll(entry.getValue().get(1));
- 			for(int i=0;i<entry.getValue().get(0).size();i++){
- 			s21=s21+key1.get(i).toString()+" varchar(10) ,";
- 			}
- 			for(int i=0;i<nonkey1.size();i++){
- 				s21=s21+nonkey1.get(i).toString()+" varchar(10) ,";
- 				}
- 			s21=s21+"primary key(";
- 			for(int i=0;i<key1.size();i++){
- 				if(i<key1.size()-1)
- 					s21=s21+key1.get(i).toString()+",";
- 				else
- 					s21=s21+key1.get(i).toString()+"))";
- 				}
- 			String query = s11+" "+entry.getKey()+"("+s21;
- 			schemaMap.put(entry.getKey(), schemaPrivate);
- 			System.out.println(query);
- 			writeSQL(query);
- 			
- 			
- 			
- 		}
- 		
- 		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
- 			String sd1="INSERT INTO ";
- 			String sd2="";
- 			ArrayList<String> key1=new ArrayList<String>();
- 			ArrayList<String> nonkey1=new ArrayList<String>();
- 			key1.addAll(entry.getValue().get(0));
- 			nonkey1.addAll(entry.getValue().get(1));
- 			for(int i=0;i<entry.getValue().get(0).size();i++){
- 					sd2=sd2+key1.get(i).toString()+",";
-
- 			}
- 			for(int i=0;i<nonkey1.size();i++){
- 				if(i<nonkey1.size()-1)
- 				sd2=sd2+nonkey1.get(i).toString()+",";
- 				else
- 					sd2=sd2+nonkey1.get(i).toString()+")";
- 					
- 				}
- 			String sd3="";
- 			for(int i=0;i<entry.getValue().get(0).size();i++){
- 					sd3=sd3+key1.get(i).toString()+"."+tableName+",";
-
- 			}
- 			
- 			for(int i=0;i<nonkey1.size();i++){
- 				if(i<nonkey1.size()-1)
- 				sd3=sd3+nonkey1.get(i).toString()+"."+tableName+",";
- 				else
- 					sd3=sd3+nonkey1.get(i).toString()+"."+tableName;
- 			}
- 			String query = sd1+" "+entry.getKey()+"("+sd2+" "+" SELECT "+sd3+" FROM "+" "+tableName;
+	public static void decompose3NF(ArrayList<String> keysList,ArrayList<String> nonKeysList,String tableName, String output,Connection conn){
+        //Kanya
+   	 try{
+   		 
+   		 Statement stmt= conn.createStatement();
+        System.out.println("output: "+output);
+        System.out.println("decompose3NF");
+    
+		int count=2;
+		for(Map.Entry<String,String> entry:dep.entrySet()){
+			ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
+			ArrayList<String> temKey=new ArrayList<String>();
+			ArrayList<String> temValue=new ArrayList<String>();
+			temKey.add(entry.getKey());
+			temValue.add(entry.getValue());
+			tem.add(temKey);
+			tem.add(temValue);
+			decompose.put(tableName+Integer.toString(count),tem);
+			schemaMap.put(tableName+Integer.toString(count),schemaPrivate);
+			mainkey.add(entry.getKey());
+			System.out.println(mainkey);
+			mainvalue.add(entry.getValue());
+			System.out.println(mainvalue);
+			count++;
+			
+		}
+		mainkey.removeAll(mainvalue);
+		System.out.println(mainkey);
+		ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
+		ArrayList<String> temValue=new ArrayList<String>();
+		temValue.addAll(nonKeysList);
+		temValue.retainAll(mainkey);
+		System.out.println(temValue);
+		tem.add(keysList);
+		tem.add(temValue);
+		decompose.put(tableName+"1", tem);
+		String sc1="CREATE table";
+		String s2="";
+		int stc=0;
+		
+		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+			String s11="CREATE table";
+			String s21="";
+			ArrayList<String> key1=new ArrayList<String>();
+			ArrayList<String> nonkey1=new ArrayList<String>();
+			key1.addAll(entry.getValue().get(0));
+			nonkey1.addAll(entry.getValue().get(1));
+			for(int i=0;i<entry.getValue().get(0).size();i++){
+			s21=s21+key1.get(i).toString()+" varchar(10),";
+			}
+			for(int i=0;i<nonkey1.size();i++){
+				s21=s21+nonkey1.get(i).toString()+" varchar(10),";
+				}
+			s21=s21+"primary key(";
+			for(int i=0;i<key1.size();i++){
+				if(i<key1.size()-1)
+					s21=s21+key1.get(i).toString()+",";
+				else
+					s21=s21+key1.get(i).toString()+"))";
+				}
+			String query = s11+" "+schemaMap.get(entry.getKey())+"."+entry.getKey()+"("+s21;
+			//schemaMap.put(entry.getKey(), schemaPrivate); // TODO: why commented out?
+			System.out.println(query);
 			writeSQL(query);
- 		}
-     }
-     
-     
-     public void join(String tableName){
- 		HashMap<String, ArrayList<ArrayList<String>>> join=new HashMap<String, ArrayList<ArrayList<String>>>();
- 		int count=2;
- 		ArrayList<String> pkey=new ArrayList<String>();
+			//Statement stmt= conn.createStatement();
+			
+			stmt.executeUpdate(query);
+			System.out.println("furuuruurdurur");
+			
+		}
+		
+		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+			String sd1="INSERT INTO ";
+			String sd2="";
+			ArrayList<String> key1=new ArrayList<String>();
+			ArrayList<String> nonkey1=new ArrayList<String>();
+			key1.addAll(entry.getValue().get(0));
+			nonkey1.addAll(entry.getValue().get(1));
+			for(int i=0;i<entry.getValue().get(0).size();i++){
+				if(nonkey1.size()==0&&i==entry.getValue().get(0).size()-1)
+					sd2=sd2+key1.get(i).toString()+")";
+				else
+					sd2=sd2+key1.get(i).toString()+",";
+
+			}
+			for(int i=0;i<nonkey1.size();i++){
+				if(i<nonkey1.size()-1)
+				sd2=sd2+nonkey1.get(i).toString()+",";
+				else
+					sd2=sd2+nonkey1.get(i).toString()+")";
+					
+				}
+			String sd3="";
+			for(int i=0;i<entry.getValue().get(0).size();i++){
+					sd3=sd3+tableName+"."+key1.get(i).toString()+",";
+
+			}
+			
+			for(int i=0;i<nonkey1.size();i++){
+				if(i<nonkey1.size()-1)
+				sd3=sd3+tableName+"."+nonkey1.get(i).toString()+",";
+				else
+					sd3=sd3+tableName+"."+nonkey1.get(i).toString();
+			}
+			String query = sd1+" "+schemaMap.get(entry.getKey())+"."+entry.getKey()+"("+sd2+" "+" SELECT DISTINCT "+sd3+" FROM "+" "+schemaMap.get(tableName)+"."+tableName;
+			System.out.println(query);
+			writeSQL(query);
+			//Statement stmt = conn.createStatement();
+			stmt.executeUpdate(query);
+			//System.out.println("asdf");
+		}
+    }
+   	 catch(Exception e){
+   		 System.out.println(e);
+   	 }
+    }
+	
+	public static void join1(String tableName,Connection conn){
+   	 try{
+   	 HashMap<String, ArrayList<ArrayList<String>>> join=new HashMap<String, ArrayList<ArrayList<String>>>();
+   	 ArrayList<String> pkey=new ArrayList<String>();
  		ArrayList<String> nkey=new ArrayList<String>();
  		ArrayList<ArrayList<String>> values=new ArrayList<ArrayList<String>>();
  		if(decompose.size()>0){
+ 			ResultSet rs;
+ 			System.out.println("decompose size"+decompose.size());
  			pkey.addAll(decompose.get(tableName+"1").get(0));
- 			nkey.addAll(decompose.get(tableName+"1").get(1));  
- 			values.add(pkey);
- 			values.add(nkey);
- 			join.put("T1",values);
- 		for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
- 			
- 			
- 			ArrayList<String> pkey1=new ArrayList<String>();
- 			ArrayList<String> nkey1=new ArrayList<String>();
- 			ArrayList<ArrayList<String>> values1=new ArrayList<ArrayList<String>>();
- 			ArrayList<String> tempkeys=new ArrayList<String>();
- 			
- 			if(entry.getKey()!=tableName+"1")
- 			{
- 			
- 				String s1="";
- 				tempkeys.addAll(join.get("T"+Integer.toString(count-1)).get(0));
- 				tempkeys.addAll(join.get("T"+Integer.toString(count-1)).get(1));
- 				if(tempkeys.containsAll(nkey1)){
- 					System.out.println("asdf");
- 						values1.add(join.get("T"+Integer.toString(count-1)).get(0));
- 						pkey1.addAll(entry.getValue().get(1));
- 						nkey.addAll(pkey1);
- 						values1.add(nkey);
- 					join.put("T"+Integer.toString(count),values1);
- 					System.out.println(join.get("T"+Integer.toString(count)));
- 					for(String x:join.get("T"+Integer.toString(count-1)).get(0)){
- 						s1=s1+"T"+Integer.toString(count-1)+"."+x+",";
- 					}
- 					for(int j=0;j<join.get("T"+Integer.toString(count-1)).get(1).size();j++){
- 				
- 							s1=s1+"T"+Integer.toString(count-1)+"."+join.get("T"+Integer.toString(count-1)).get(1).get(j)+",";
-
- 					}
- 					for(int i=0;i<entry.getValue().get(1).size();i++){
- 						if(i<entry.getValue().get(1).size()-1)
- 						s1=s1+entry.getKey()+"."+entry.getValue().get(1).get(i)+",";
- 						else
- 							s1=s1+entry.getKey()+"."+entry.getValue().get(1).get(i);
- 					}
- 					String s2="";
- 					for(int i=0;i<entry.getValue().get(0).size();i++){
- 						if(i<entry.getValue().get(1).size()-1)
- 						s2=s2+"T"+Integer.toString(count-1)+"."+entry.getValue().get(0).get(i)+"="+entry.getKey()+"."+entry.getValue().get(0).get(i)+"and";
- 						else
- 							s2=s2+"T"+Integer.toString(count-1)+"."+entry.getValue().get(0).get(i)+"="+entry.getKey()+"."+entry.getValue().get(0).get(i);
- 					}
- 					String s3="";
- 					for(int j=0;j<join.get("T"+Integer.toString(count-1)).get(0).size();j++){
- 						if(j<join.get("T"+Integer.toString(count-1)).get(0).size()-1)
- 						s3=s3+"T"+Integer.toString(count-1)+"."+join.get("T"+Integer.toString(count-1)).get(0).get(j)+",";
- 						else
- 							s3=s3+"T"+Integer.toString(count-1)+"."+join.get("T"+Integer.toString(count-1)).get(0).get(j);
- 					}
- 					String select = "select "+s1+" FROM "+"T"+Integer.toString(count-1);
- 					String innerJoin = " INNER JOIN "+entry.getKey()+" ON"+s2;
-	 				String orderBy = " ORDER BY "+s3;
-	 				
-	 				String query = select+innerJoin+orderBy;
-	 				writeSQL(select + newLine + tab + innerJoin + newLine + tab + tab + orderBy);
- 				}
+			nkey.addAll(decompose.get(tableName+"1").get(1));  
+			values.add(pkey);
+			values.add(nkey);
+			join.put(tableName+"D1",values);
+			
+			System.out.println(join.get(tableName+"D1")+"1 st table");
+			int c=1;
+			int count=2,f=0;
+			for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+				//System.out.println(entry.getKey());
+				ArrayList<String> pkey1=new ArrayList<String>();
+	 			ArrayList<String> nkey1=new ArrayList<String>();
+	 			ArrayList<String> nkeyp=new ArrayList<String>();
+	 			ArrayList<ArrayList<String>> values1=new ArrayList<ArrayList<String>>();
+	 			ArrayList<String> tempkeys=new ArrayList<String>();
+				if(c==1){
+					c=0;
+					continue;
+				}
+				else{
+					
+					System.out.println(entry.getKey());
+					pkey1.addAll(entry.getValue().get(0));
+					nkey1.addAll(entry.getValue().get(1));
+					nkeyp.addAll(nkey);
+					if(!nkey.containsAll(nkey1)){
+					nkey.addAll(nkey1);
+					f=1;
+					
+					
+						
+					values1.add(pkey);
+					values1.add(nkey);
+					join.put(tableName+"D"+Integer.toString(count),values1);
+					System.out.println(join.get(tableName+"D"+Integer.toString(count))+"2 st table");
+					String s1="";
+					for(String x:pkey){
+						s1=s1+schemaMap.get(tableName)+"."+tableName+Integer.toString(count-1)+"."+x+",";
+					}
+					for(int i=0;i<nkeyp.size();i++){
+						if(nkey1.size()==0&&i==nkeyp.size()-1)
+							s1=s1+schemaMap.get(tableName)+"."+tableName+Integer.toString(count-1)+"."+nkeyp.get(i);
+						else
+						s1=s1+schemaMap.get(tableName)+"."+tableName+Integer.toString(count-1)+"."+nkeyp.get(i)+",";
+					
+					}
+					
+					for(int i=0;i<nkey1.size();i++){
+						if(i==nkey1.size()-1)
+							s1=s1+schemaMap.get(tableName)+"."+tableName+Integer.toString(count)+"."+nkey1.get(i);
+						else
+						s1=s1+schemaMap.get(tableName)+"."+tableName+Integer.toString(count)+"."+nkey1.get(i)+",";
+					
+					}
+					String s2="";
+					for(int i=0;i<pkey1.size();i++){
+						if(i<pkey1.size()-1)
+	 						s2=s2+tableName+Integer.toString(count-1)+"."+pkey1.get(i)+"="+entry.getKey()+"."+pkey1.get(i)+"and";
+	 						else
+	 							s2=s2+tableName+Integer.toString(count-1)+"."+pkey1.get(i)+"="+entry.getKey()+"."+pkey1.get(i);
+					}
+					String s3="";
+					for(int i=0;i<pkey.size();i++){
+						if(i<pkey.size()-1)
+	 						s3=s3+tableName+Integer.toString(count-1)+"."+pkey.get(i)+" and ";
+	 						else
+	 							s3=s3+tableName+Integer.toString(count-1)+"."+pkey.get(i);
+				}
+					String query = "select "+" "+s1+" FROM "+schemaMap.get(tableName)+"."+tableName+Integer.toString(count-1)+" \nINNER JOIN "+schemaMap.get(entry.getKey())+"."+entry.getKey()+" ON "+s2;
+			
+			
+				System.out.println(f);
+			writeSQL(query);
+			System.out.println(query);
+				 rs = executeQuery(query);
+			
+					}
+				}
+				count++;
+				f=0;
+ 		}
+    
+ 		}
+   	 }
+   	 catch(Exception e){
+   		 System.out.println(e);
+   	 }
+    }
+	
+	public static void join2nf(String tableName,Connection conn){
+   	 try{
+   		 ResultSet rs;
+   	 HashMap<String, ArrayList<ArrayList<String>>> join=new HashMap<String, ArrayList<ArrayList<String>>>();
+   	 ArrayList<String> pkey=new ArrayList<String>();
+ 		ArrayList<String> nkey=new ArrayList<String>();
+ 		ArrayList<ArrayList<String>> values=new ArrayList<ArrayList<String>>();
+ 		if(decompose.size()>0){
+ 			System.out.println("decompose size"+decompose.size());
+ 			pkey.addAll(decompose.get(tableName+"1").get(0));
+			nkey.addAll(decompose.get(tableName+"1").get(1));  
+			values.add(pkey);
+			values.add(nkey);
+			join.put(tableName+"D1",values);
+			int rss1=0,rss2=-1;
+			System.out.println(join.get(tableName+"D1")+"1 st table");
+			int c=1;
+			int count=2,f=0;
+			for(Map.Entry<String ,ArrayList<ArrayList<String>>> entry:decompose.entrySet()){
+				//System.out.println(entry.getKey());
+				ArrayList<String> pkey1=new ArrayList<String>();
+	 			ArrayList<String> nkey1=new ArrayList<String>();
+	 			ArrayList<String> nkeyp=new ArrayList<String>();
+	 			ArrayList<ArrayList<String>> values1=new ArrayList<ArrayList<String>>();
+	 			ArrayList<String> tempkeys=new ArrayList<String>();
+				if(c==1){
+					c=0;
+					continue;
+				}
+				else{
+					
+					System.out.println(entry.getKey());
+					pkey1.addAll(entry.getValue().get(0));
+					nkey1.addAll(entry.getValue().get(1));
+					nkeyp.addAll(nkey);
+					if(!nkey.containsAll(nkey1)){
+					nkey.addAll(nkey1);
+					f=1;
+					
+					
+						
+					values1.add(pkey);
+					values1.add(nkey);
+					join.put(tableName+"D"+Integer.toString(count),values1);
+					System.out.println(join.get(tableName+"D"+Integer.toString(count))+"2 st table");
+					String s1="";
+					for(String x:pkey){
+						s1=s1+schemaMap.get(tableName+Integer.toString(count-1))+"."+tableName+Integer.toString(count-1)+"."+x+",";
+					}
+					for(int i=0;i<nkeyp.size();i++){
+						if(nkey1.size()==0&&i==nkeyp.size()-1)
+							s1=s1+schemaMap.get(tableName+Integer.toString(count-1))+"."+tableName+Integer.toString(count-1)+"."+nkeyp.get(i);
+						else
+						s1=s1+schemaMap.get(tableName+Integer.toString(count-1))+"."+tableName+Integer.toString(count-1)+"."+nkeyp.get(i)+",";
+					
+					}
+					
+					for(int i=0;i<nkey1.size();i++){
+						if(i==nkey1.size()-1)
+							s1=s1+schemaMap.get(tableName+Integer.toString(count))+"."+tableName+Integer.toString(count)+"."+nkey1.get(i);
+						else
+						s1=s1+schemaMap.get(tableName+Integer.toString(count))+"."+tableName+Integer.toString(count)+"."+nkey1.get(i)+",";
+					
+					}
+					String s2="";
+					for(int i=0;i<pkey1.size();i++){
+						if(i<pkey1.size()-1)
+	 						s2=s2+tableName+Integer.toString(count-1)+"."+pkey1.get(i)+"="+entry.getKey()+"."+pkey1.get(i)+" and ";
+	 						else
+	 							s2=s2+tableName+Integer.toString(count-1)+"."+pkey1.get(i)+"="+entry.getKey()+"."+pkey1.get(i);
+					}
+					String s3="";
+					for(int i=0;i<pkey.size();i++){
+						if(i<pkey.size()-1)
+	 						s3=s3+tableName+Integer.toString(count-1)+"."+pkey.get(i)+" and ";
+	 						else
+	 							s3=s3+tableName+Integer.toString(count-1)+"."+pkey.get(i);
+				}
+					String query = "select"+" "+s1+" FROM "+schemaMap.get(tableName)+"."+tableName+Integer.toString(count-1)+" \nINNER JOIN "+schemaMap.get(entry.getKey())+"."+entry.getKey()+" ON "+s2;
+			
+			
+				System.out.println(f);
+			writeSQL(query);
+			System.out.println(query);
+				 rs = executeQuery(query);
+				 while(rs.next()){
+					 rss1=rs.getInt(1);
+				 }
+					}
+				}
+				count++;
+				f=0;
+ 		}
+			/*String query1 = "SELECT COUNT(*) FROM " + schemaMap.get(tableName) + "." + tableName;
+			writeSQL(query1);
+			ResultSet rs1 = executeQuery(query1);
+			while(rs1.next()){
+				rss2=rs1.getInt(1);
+			}
+			if(rss1==rss2){
+				System.out.println("join successful");
+			}*/
+			
+ 		}
  		
- 			}
- 			count++;
- 		}
- 		}
- 	}
+   	 }
+   	 catch(Exception e){
+   		 System.out.println(e);
+   	 }
+    }
      
-     public static boolean oneNF(ArrayList<String> keysList,ArrayList<String> nonKeysList,String tableName,Connection conn) {
+     public static String oneNF(ArrayList<String> keysList,ArrayList<String> nonKeysList,String tableName,Connection conn) {
          //Devin
          //use isnull in sql to check null keys
          //for finding duplicate: (select k, count(*) from R group by k)==n
@@ -433,12 +662,12 @@ public class Main {
 // 				}
  				
  	//			String query = "select * from team06schema.testt";
- 				writeSQL(query + " \nWHERE " + whereClause);
+ 				writeSQL(query + " \n\tWHERE " + whereClause);
  				ResultSet rs = executeQuery(query + " WHERE " + whereClause);
  	            while(rs.next()){
  	            	if (rs.getInt(1) > 0) {
  	            		System.out.println("1NF Validation error " + schemaMap.get(tableName) + "." + tableName + ": null candidate key");
- 	            		return false;
+ 	            		return schemaMap.get(tableName) + "." + tableName + ": null candidate key";
  	            	}
  	            }
  	            
@@ -454,18 +683,38 @@ public class Main {
  	            while(rs.next()){
  	            	if (rs.getInt(1) > 1) {
  	            		System.out.println("1NF Validation error " + schemaMap.get(tableName) + "." + tableName + ": duplicate candidate keys");
- 	            		return false;
+ 	            		return schemaMap.get(tableName) + "." + tableName + ": duplicate candidate keys";
  	            	}
  	            }
+ 	            
+ 	            String columns = "";
+ 	            for (int i = 0; i < keysList.size(); i++) {
+ 	            	columns += keysList.get(i) + ",";
+ 	            }
+ 	            for (int i = 0; i < nonKeysList.size(); i++) {
+ 	            	columns += nonKeysList.get(i) + ",";
+ 	            }
+ 	            columns = columns.substring(0, columns.length()-1);
+// 	            groupBy = " GROUP BY " + columns;
+ 	            select = "SELECT " + columns + " FROM " + schemaMap.get(tableName) + "." + tableName;
+ 	            query = select;
+ 				writeSQL(select);
+ 	            rs = executeQuery(query);
 // 			}
  		} catch (SQLException e) {
  			System.out.println("1NF query failed.");
- 			System.out.println(e.getMessage());
- 			e.printStackTrace();
- 			
- 			return false;
+ 			String errorMessage = e.getMessage();
+ 			System.out.println(errorMessage);
+// 			e.printStackTrace();
+
+ 			if (errorMessage.contains("ERROR:")) {
+ 				return errorMessage.substring(errorMessage.indexOf(":")+2);
+ 			} else {
+ 				return errorMessage;
+ 			}
  		}
-         return true;
+    	 
+        return "";
      }
      public static String twoNF(ArrayList<String> keysList,ArrayList<String> nonKeysList,String tableName,Connection conn) {
          
@@ -508,16 +757,18 @@ public class Main {
                          ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
                          ArrayList<String> temKey=new ArrayList<String>();
                          ArrayList<String> temValue=new ArrayList<String>();
-                         if (!sampvalue.contains(nonKeysList)) {
+                       
                         	 temKey.add(keysList.get(i));
 		                     temValue.add(nonKeysList.get(j));
 		                     tem.add(temKey);
 		                     tem.add(temValue);
 		                     decompose.put(tableName+Integer.toString(count),tem);
-		                     count++;
+		                    
 		                     sampvalue.add(nonKeysList.get(j));
-                         }
-	                 }
+		                     schemaMap.put(tableName+Integer.toString(count), schemaPrivate);
+		                     System.out.println(tableName+Integer.toString(count)+schemaMap.get(tableName+Integer.toString(count)));
+		                     count++;
+                     }
                  }
              }
              Statement stmt3 = conn.createStatement();
@@ -562,16 +813,18 @@ public class Main {
                                  ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
                      			ArrayList<String> temKey=new ArrayList<String>();
                      			ArrayList<String> temValue=new ArrayList<String>();
-                                if (!sampvalue.contains(nonKeysList)) {
+                               
 		                             temKey.add(keysList.get(i));
 		                             temKey.add(keysList.get(j));
 		                             temValue.add(nonKeysList.get(k));
 		                             tem.add(temKey);
 		                             tem.add(temValue);
 		                             decompose.put(tableName+Integer.toString(count),tem);
-		                             count++;
+		                             
 		                             sampvalue.add(nonKeysList.get(k));
-                                }
+		                             schemaMap.put(tableName+Integer.toString(count), schemaPrivate);
+		                             System.out.println(tableName+Integer.toString(count)+schemaMap.get(tableName+Integer.toString(count)));
+                                count++;
                              }
                              
                              
@@ -619,7 +872,7 @@ public class Main {
                                      ArrayList<ArrayList<String>> tem=new ArrayList<ArrayList<String>>();
                          			ArrayList<String> temKey=new ArrayList<String>();
                          			ArrayList<String> temValue=new ArrayList<String>();
-                                    if (!sampvalue.contains(nonKeysList)) {
+
 		                                 temKey.add(keysList.get(i));
 		                                 temKey.add(keysList.get(j));
 		                                 temKey.add(keysList.get(l));
@@ -627,9 +880,9 @@ public class Main {
 		                                 tem.add(temKey);
 		                                 tem.add(temValue);
 		                                 decompose.put(tableName+Integer.toString(count),tem);
-		                                 count++;
 		                                 sampvalue.add(nonKeysList.get(k));
-                                    }
+		                                 schemaMap.put(tableName+Integer.toString(count), schemaPrivate);
+		                                 count++;
                                  }
                                  }
                              }
@@ -651,7 +904,7 @@ public class Main {
 	     tem.add(temKey);
 	     tem.add(sampkey1);
 	     decompose.put(tableName+Integer.toString(1),tem);
-             
+	     schemaMap.put(tableName+Integer.toString(1), schemaPrivate);
          }catch(SQLException e) {
              System.err.println("Could not check the 2NF");
          e.printStackTrace();
@@ -700,7 +953,7 @@ public class Main {
                          if(value1==value2){
                                  //System.out.println(nonKeysList.get(i)+" -> "+ nonKeysList.get(j)+"\n");
                                  output=output+nonKeysList.get(i)+"->"+ nonKeysList.get(j)+", ";                                 
-                         if(dep.containsKey(nonKeysList.get(i)))
+                         if(!dep.containsKey(nonKeysList.get(i)))
                                  dep.put(nonKeysList.get(i), nonKeysList.get(j));
                          }
                  }
@@ -837,7 +1090,7 @@ public class Main {
 	        	Table table = new Table(tableName, columns);
 	        	tables.add(table);
 	        	tableData.put(tableName, table);
-	        	schemaMap.put(tableName, schemaPrivate);
+	        	schemaMap.put(tableName, schemaPrivate); //***TODO: change to schemaPublic
 	        	
 //	        	candidateKeysStr = candidateKeysStr.substring(0, candidateKeysStr.length()-1);
 //	        	tableSchemas.put(tableName, candidateKeysStr);

@@ -1,0 +1,7 @@
+#Table	3NF	Failed	Reason
+R	N	1NF	Column "C" does not exist
+S	Y
+T	Y
+x	N	2NF	k1,k2->A
+Y	N	2NF	k2,k4->A, k1,k2,k4->A, k2,k3,k4->A
+Z	N	3NF	B->A, B->C, D->A, A,B->C, A,C->B, B,C->A, B,D->A, B,D->C, C,D->A, C,D->B, A,B,D->C, A,C,D->B, B,C,D->A
